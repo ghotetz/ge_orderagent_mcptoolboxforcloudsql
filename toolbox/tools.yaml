@@ -1,0 +1,71 @@
+#Toolbox conn DB
+kind: source
+#source info
+name: shop-db
+type: cloud-sql-postgres
+project: ${GOOGLE_CLOUD_PROJECT}
+region: ${REGION}
+instance: ${DB_INSTANCE}
+database: ${DB_NAME}
+user: ${DB_USER}
+password: ${DB_PASSWORD}
+---
+#Tool order search by client name info
+kind: tool
+name: search_orders
+type: postgres-sql
+source: shop-db
+description: 고객사 이름을 주문을 검색한다. 최든 주문부터 최대 20건.
+parameters:
+  - name: customer_name
+    type: string
+    description: 고객사 이름 일부 또는 전체
+statement: |
+  SELECT o.order_no, o.customer_name, p.name AS product, o.qty, o.status, o.ordered_At
+  FROM orders o JOIN products p ON p.id = o.product_id
+  WHERE o.customer_name ILIKE '%' || $1 || '$'
+  ORDER BY o.ordered_at DESC LIMIT 20;
+---
+#Tool ref wirh ordernum
+kind: tool
+name: get_order
+type: postgres-sql
+source: shop-db
+description: 주문번호(ORD-xxxx)로 주문 한 건의 상세를 조회한다.
+parameters:
+  - name: order_no
+    type: string
+    description: 주문번호 예 ORD-1001
+statement: |
+  SELECT o.order_no, o.customer_name, p.sku, p.name AS product, o.qty, o.status, o.ordered_at
+  FROM orders o JOIN products p ON p.id = o.product_id
+  WHERE o.order_no = $1;
+---
+#Tool low stock items list
+kind: tool
+name: low_stock_itmes
+type: postgres-sql
+source: shop-db
+description: 재고가 재주문 기준 수량 아래로 떨어진 상품 목옥을 조회한다.
+statement: |
+  SELECT sku, name, category, stock, reorder_level, reorder_level - stock AS shortage
+  FROM products WHERE stock < reorder_level ORDER BY shortage DESC;
+---
+#Tool update order status
+kind: tool
+name: update_order_status
+type: postgres-sql
+source: shop-db
+description: 주문 상태를 변경한다. 허용 값은 접수, 출구, 배송완료, 취소.
+parameters:
+  #update needed
+  - name: order_no
+    type: string
+    description: 주문번호
+  #new status
+  - name: new_status
+    type: string
+    description: 변경할 상태 (접수, 출고 , 배송완료, 취소 중 하나)
+statement: |
+  UPDATE orders SET status = $2 WHERE order_no = $1
+  RETURNING order_no, status;
