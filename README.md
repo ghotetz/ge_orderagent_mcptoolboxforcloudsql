@@ -117,6 +117,13 @@ adk web
 127.0.0.1:8000
 ```
 
+- Agent 검증
+```bash
+A 상사 주문 현황 알려줘 > search_orders 호출, 승인없이 실행
+재고 부족 상품 있어? > 부족 수량 순으로 표시
+ORD-1001 출고 처리해줘 > get_order 후 update_order_status 에서 승인 대화상자 표시 확인
+```
+
 - 검증 완료 후 Gemini Enterprise 에 에이전트로 등록
 ```bash
 adk deploy agent_engine \
