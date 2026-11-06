@@ -14,7 +14,7 @@
 ```bash
 gcloud auth login
 gcloud auth application-default login
-gcloud config set project ax-gemini-lab
+gcloud config set project "gcp-project"
 ```
 
 - CloudSQL 및 DB 생성
@@ -132,3 +132,137 @@ adk deploy agent_engine \
   --display_name="에이전트명" \
   "에이전트 프로젝트 경로"
 ```
+
+# 📌 Order Agent with MCP Toolbox for Cloud SQL (Google ADK)
+
+> An agent that reads and updates order and inventory data in Cloud SQL.
+>
+> Uses Google's **MCP Toolbox for Databases** to define every permitted SQL operation as a tool, so the agent can only do what it has been explicitly allowed to do.
+
+## ⚡ Features
+
+- Queries orders and inventory in Cloud SQL (PostgreSQL) through predefined tools only — no free-form SQL
+- Read operations run immediately; state-changing operations (e.g. updating an order's status) require user approval
+- Database `CHECK` constraints act as the final guardrail against invalid values
+
+## 🛠 Tech Stack
+
+- Google ADK, MCP Toolbox for Databases, MCP, Python, Cloud SQL (PostgreSQL), Gemini Enterprise
+
+## 💻 Getting Started
+
+### 1. Authenticate to Google Cloud
+
+```bash
+gcloud auth login
+gcloud auth application-default login
+gcloud config set project "gcp-project"
+```
+
+### 2. Create the Cloud SQL instance and database
+
+```bash
+export GOOGLE_CLOUD_PROJECT="<project-id>"
+export REGION=asia-northeast3
+export DB_INSTANCE=shop-db-inst
+export DB_NAME=shopdb
+export DB_USER=postgres
+export DB_PASSWORD='<strong-password>'
+
+gcloud sql instances create $DB_INSTANCE \
+  --database-version=POSTGRES_17 --edition=ENTERPRISE \
+  --tier=db-custom-1-3840 --region=$REGION \
+  --root-password="$DB_PASSWORD"
+gcloud sql databases create $DB_NAME --instance=$DB_INSTANCE
+```
+
+### 3. Load sample data
+
+The status and sample values are kept in Korean to match the agent's tool definitions.
+
+```sql
+-- Products (inventory)
+CREATE TABLE products (
+  id SERIAL PRIMARY KEY,           -- auto-increment primary key
+  sku TEXT UNIQUE NOT NULL,        -- product code (unique)
+  name TEXT NOT NULL,              -- product name
+  category TEXT NOT NULL,          -- product category
+  stock INT NOT NULL,              -- current stock
+  reorder_level INT NOT NULL       -- reorder threshold (stock below this = low)
+);
+
+-- Orders
+CREATE TABLE orders (
+  id SERIAL PRIMARY KEY,           -- auto-increment primary key
+  order_no TEXT UNIQUE NOT NULL,   -- business order number (unique)
+  customer_name TEXT NOT NULL,     -- customer company
+  product_id INT REFERENCES products(id),
+  qty INT NOT NULL,                -- quantity ordered
+  -- order status, defaults to '접수' (received)
+  status TEXT NOT NULL DEFAULT '접수'
+    -- only four allowed values: received / shipped / delivered / cancelled
+    -- (the last line of defense against agent mistakes)
+    CHECK (status IN ('접수', '출고', '배송완료', '취소')),
+  ordered_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Four sample products
+INSERT INTO products (sku, name, category, stock, reorder_level) VALUES
+ ('KB-100', '무선 키보드', '주변기기', 12, 20),          -- wireless keyboard: 12 < 20 → low
+ ('MS-200', '인체공학 마우스', '주변기기', 85, 30),       -- ergonomic mouse: sufficient
+ ('MN-270', '27인치 모니터', '디스플레이', 4, 10),        -- 27" monitor: 4 < 10 → low
+ ('HD-050', '노이즈켄슬링 헤드셋', '오디오', 40, 15);     -- ANC headset: sufficient
+
+-- Four sample orders covering the test scenarios
+INSERT INTO orders (order_no, customer_name, product_id, qty, status) VALUES
+ ('ORD-1001', 'A상사', 1, 5, '접수'),       -- for testing the "ship" action
+ ('ORD-1002', 'A상사', 3, 2, '출고'),       -- already shipped
+ ('ORD-1003', 'B테크', 2, 20, '배송완료'),  -- delivered: update should be refused
+ ('ORD-1004', 'B테크', 4, 10, '접수');      -- for testing a disallowed status value
+```
+
+### 4. Install Google ADK
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install "google-adk[gcp]" litellm
+```
+
+### 5. Run and verify MCP Toolbox
+
+```bash
+cd toolbox
+curl -O https://storage.googleapis.com/mcp-toolbox-for-databases/v1.1.0/linux/amd64/toolbox
+chmod +x toolbox
+./toolbox --config tools.yaml --enable-api      # default port 5000
+
+# In another terminal, list the available tools
+curl http://127.0.0.1:5000/api/toolset
+```
+
+### 6. Run the agent locally (with Toolbox still running, in a separate terminal)
+
+```bash
+adk web
+# open http://127.0.0.1:8000
+```
+
+### 7. Try it
+
+| Prompt | Expected behavior |
+| --- | --- |
+| Show me A상사's orders | Calls `search_orders` and runs without approval |
+| Any products low on stock? | Lists low-stock products, largest shortfall first |
+| Mark ORD-1001 as shipped | Calls `get_order`, then shows an approval dialog before `update_order_status` |
+
+### 8. Deploy and register in Gemini Enterprise
+
+```bash
+adk deploy agent_engine \
+  --project="<project-id>" \
+  --region="<region>" \
+  --display_name="<agent-name>" \
+  "<path-to-agent-project>"
+```
+
+Once deployed to Vertex AI Agent Engine, register the agent in Gemini Enterprise.
