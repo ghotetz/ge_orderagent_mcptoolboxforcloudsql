@@ -7,7 +7,7 @@
 > 에이전트가 허용된 작업만 CloudSQL 에 진행
 
 ## 🛠 기술 스택 (Tech Stack)
-- Google ADK, MCP Toolbox for Databases, MCP, Python
+- Google ADK, MCP Toolbox for Databases, MCP, Python, CloudSQL, Gemini-Enterprise, AI-Agents
 
 ## 💻 시작 가이드 (Getting Started)
 - Google Cloud 인증
